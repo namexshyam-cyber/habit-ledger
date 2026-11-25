@@ -1,5 +1,13 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Habit Ledger</title>
+<meta name="description" content="Habit Ledger is a free habit tracker for daily, weekly and monthly habits. Tick off your habits, see streaks and monthly progress. Your data stays on your device.">
+<link rel="canonical" href="https://namexshyam-cyber.github.io/habit-ledger/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Habit Ledger - free habit tracker">
+<meta property="og:description" content="Track daily, weekly and monthly habits with streaks and progress views. Free, private, no sign-up.">
+<meta property="og:url" content="https://namexshyam-cyber.github.io/habit-ledger/">
+<meta name="theme-color" content="#0B6B52">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230B6B52'/%3E%3Cpath d='M26 52l16 16 32-34' fill='none' stroke='white' stroke-width='11' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -242,6 +250,19 @@ tr.slot2 th span{position:sticky;left:10px;padding-right:10px}
   .hero{gap:14px}
   .hero-d{font-size:22px}
 }
+
+/* community chat */
+.chatbox{padding:16px;display:flex;flex-direction:column;gap:6px}
+.chat-list{height:min(52vh,420px);overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--sunk);border-radius:10px;margin:6px 0}
+.msg{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;max-width:92%;align-self:flex-start}
+.msg.me{align-self:flex-end;border-color:var(--accent)}
+.mh{font:500 11px var(--font-mono);color:var(--ink-2);display:flex;gap:8px;align-items:baseline}
+.mh b{color:var(--ink);font-weight:600}
+.mt{overflow-wrap:anywhere;white-space:pre-wrap;margin-top:2px}
+.chat-form{display:flex;gap:8px}
+.chat-form input{flex:1;min-width:0}
+.chat-note{font-size:13px}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);font:inherit;text-decoration:underline}
 </style>
 
 <header class="top">
@@ -261,6 +282,7 @@ tr.slot2 th span{position:sticky;left:10px;padding-right:10px}
       <button class="tab" data-act="tab" data-tab="weeks">Weeks</button>
       <button class="tab" data-act="tab" data-tab="year">Year</button>
       <button class="tab" data-act="tab" data-tab="todo">To-do</button>
+      <button class="tab" data-act="tab" data-tab="chat">Chat</button>
     </nav>
   </div>
 </header>
@@ -796,7 +818,107 @@ function viewHabits(){
   return h;
 }
 
-const VIEWS={today:viewToday,month:viewMonth,weeks:viewWeeks,year:viewYear,todo:viewTodo,habits:viewHabits};
+/* ---------- public chat (Firebase Realtime Database) ---------- */
+const FB_CONFIG={
+  apiKey:"AIzaSyBJP4Sh-mc26XGiNslQFkZ9tO6m7lt53KY",
+  authDomain:"habit-ledger-chat.firebaseapp.com",
+  databaseURL:"https://habit-ledger-chat-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"habit-ledger-chat",
+  storageBucket:"habit-ledger-chat.firebasestorage.app",
+  messagingSenderId:"1077102299451",
+  appId:"1:1077102299451:web:c4955151593824e1360f1e"
+};
+const FB_VER='10.14.1';
+const chat={state:'idle',msgs:[],db:null,api:null,last:0,name:'',err:''};
+try{chat.name=localStorage.getItem('habit-ledger-chat-name')||'';}catch(e){}
+function chatStatus(){
+  const s=$('#chatStatus');if(!s)return;
+  s.textContent=chat.err||({idle:'',connecting:'Connecting\u2026',online:chat.msgs.length?'':'No messages yet. Say hello!',error:'Could not connect. Check your internet, then open this tab again.'})[chat.state]||'';
+}
+function chatNode(m){
+  const d=document.createElement('div');d.className='msg'+(m.name===chat.name?' me':'');
+  const h=document.createElement('div');h.className='mh';
+  const b=document.createElement('b');b.textContent=m.name||'Guest';
+  const t=document.createElement('span');
+  try{t.textContent=new Date(m.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){}
+  h.appendChild(b);h.appendChild(t);
+  const x=document.createElement('div');x.className='mt';x.textContent=m.text;
+  d.appendChild(h);d.appendChild(x);return d;
+}
+function chatAdd(m){
+  chat.msgs.push(m);if(chat.msgs.length>100)chat.msgs.shift();
+  const l=ui.tab==='chat'?$('#chatList'):null;
+  if(l){
+    const near=l.scrollHeight-l.scrollTop-l.clientHeight<80;
+    l.appendChild(chatNode(m));
+    while(l.children.length>100)l.removeChild(l.firstChild);
+    if(near)l.scrollTop=l.scrollHeight;
+    chatStatus();
+  }
+}
+function chatConnect(){
+  if(chat.state==='connecting'||chat.state==='online')return;
+  chat.state='connecting';chatStatus();
+  const base='https://www.gstatic.com/firebasejs/'+FB_VER+'/';
+  Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-database.js')]).then(function(m){
+    const app=m[0].initializeApp(FB_CONFIG);
+    const auth=m[1].getAuth(app);
+    chat.db=m[2].getDatabase(app);chat.api=m[2];
+    return m[1].signInAnonymously(auth).then(function(){
+      const q=m[2].query(m[2].ref(chat.db,'messages'),m[2].limitToLast(100));
+      m[2].onChildAdded(q,function(snap){
+        const v=snap.val()||{};
+        chatAdd({id:snap.key,name:String(v.name||'').slice(0,20),text:String(v.text||'').slice(0,300),ts:+v.ts||Date.now()});
+      });
+      chat.state='online';chatStatus();
+    });
+  }).catch(function(){chat.state='error';chatStatus();});
+}
+function chatSend(text){
+  if(chat.state!=='online'||!chat.api){chat.err='Not connected yet. Please wait a moment.';chatStatus();return false;}
+  if(Date.now()-chat.last<2000){chat.err='Slow down a little.';chatStatus();return false;}
+  chat.err='';chat.last=Date.now();
+  chat.api.push(chat.api.ref(chat.db,'messages'),{name:chat.name,text:text,ts:chat.api.serverTimestamp()}).catch(function(){chat.err='Message could not be sent.';chatStatus();});
+  chatStatus();return true;
+}
+function viewChat(){
+  let h='<section class="panel chatbox"><h2 class="h2">Community chat</h2>'
+   +'<p class="muted chat-note">A public room: everyone can read it. Be kind, and never share phone numbers, addresses or other personal details.</p>';
+  if(!chat.name){
+    h+='<form id="chatName" class="chat-form" autocomplete="off"><input type="text" name="n" placeholder="Pick a display name" maxlength="20" aria-label="Display name"><button class="btn primary" type="submit">Join</button></form>';
+  }else{
+    h+='<div class="muted chat-note" id="chatStatus" aria-live="polite"></div>'
+     +'<div class="chat-list" id="chatList" aria-live="polite"></div>'
+     +'<form id="chatForm" class="chat-form" autocomplete="off"><input type="text" id="chatText" name="t" placeholder="Write a message" maxlength="300" aria-label="Message"><button class="btn primary" type="submit">Send</button></form>'
+     +'<p class="muted chat-note">Chatting as <b>'+esc(chat.name)+'</b> \u00b7 <button type="button" class="linkbtn" data-chat="rename">Change name</button></p>';
+  }
+  return h+'</section>';
+}
+function chatMount(){
+  if(!chat.name)return;
+  chatConnect();
+  const l=$('#chatList');if(!l)return;
+  l.textContent='';chat.msgs.forEach(function(m){l.appendChild(chatNode(m));});
+  l.scrollTop=l.scrollHeight;chatStatus();
+}
+document.addEventListener('submit',function(e){
+  const f=e.target;
+  if(f.id==='chatName'){
+    e.preventDefault();const v=f.elements.n.value.trim().slice(0,20);if(!v)return;
+    chat.name=v;try{localStorage.setItem('habit-ledger-chat-name',v);}catch(x){}
+    render();
+  }else if(f.id==='chatForm'){
+    e.preventDefault();const v=f.elements.t.value.trim().slice(0,300);if(!v)return;
+    if(chatSend(v))f.elements.t.value='';
+    f.elements.t.focus();
+  }
+});
+document.addEventListener('click',function(e){
+  const t=e.target.closest('[data-chat="rename"]');if(!t)return;
+  chat.name='';render();
+});
+
+const VIEWS={today:viewToday,month:viewMonth,weeks:viewWeeks,year:viewYear,todo:viewTodo,habits:viewHabits,chat:viewChat};
 
 /* ---------- render ---------- */
 function paintChrome(){
@@ -818,6 +940,7 @@ function render(){
   if(ui.focus){const el=v.querySelector('[data-fk="'+ui.focus+'"]');if(el&&!el.disabled)el.focus({preventScroll:true});ui.focus=null;}
   if(ui.focusSel){const el=$(ui.focusSel);if(el)el.focus({preventScroll:true});ui.focusSel=null;}
   paintChrome();
+  if(ui.tab==='chat')chatMount();
 }
 
 /* ---------- actions ---------- */
